@@ -30,7 +30,7 @@ def optimize(v_init, v_k, v_goal, f, iter):
         v = X_k[i][2] - X_k[i][0]
         cos = torch.dot(u, v) / (torch.norm(u) * torch.norm(v))
         sin = torch.sqrt(1 - cos ** 2)
-        
+        '''
         # transfer to 2d coordinate
         T_init = torch.tensor([[torch.norm(u_init), cos_init * torch.norm(v_init)],[0, sin_init * torch.norm(v_init)]], device='cuda')
         T_goal = torch.tensor([[torch.norm(u_goal), cos_goal * torch.norm(v_goal)],[0, sin_goal * torch.norm(v_goal)]], device='cuda')
@@ -55,7 +55,7 @@ def optimize(v_init, v_k, v_goal, f, iter):
         cot[i][1] = (u_ig[0] - v_ig[0]) / v_ig[1]
         cos_i_0 = (u_ig * u_ig + v_ig * v_ig - (u_ig - v_ig) * (u_ig - v_ig)) / (2 * torch.norm(u_ig) * torch.norm(v_ig))
         cot[i][0] = cos_i_0 / torch.sqrt(1 - cos_i_0 ** 2)
-        
+        '''
         
         u_ig_norm = torch.min(torch.norm(u_goal) * torch.norm(u_init) / torch.norm(u), torch.norm(u_init))
         v_ig_norm = torch.min(torch.norm(v_goal) * torch.norm(v_init) / torch.norm(v), torch.norm(v_init))
@@ -157,8 +157,8 @@ goal_verts = goal_mesh.vertices
 faces = goal_mesh.faces      
 # read obj mesh
 loss_list = []
+simulate()
 for iter in range(8):
-    simulate()
     init_mesh = trimesh.load_mesh('/root/libuipc/output/cloth_surface0.obj')
     rest_k_mesh = trimesh.load_mesh('/root/libuipc/python/mesh/opt_mesh.obj')
     k_mesh = trimesh.load_mesh('/root/libuipc/output/cloth_surface100.obj')
@@ -180,5 +180,6 @@ for iter in range(8):
     v_opt += init_center - opt_center
     # print("v_opt - v_k = ", v_opt - k_verts)
     trimesh.Trimesh(vertices=v_opt, faces=faces).export('/root/libuipc/python/mesh/opt_mesh.obj')
+    simulate()
 print(loss_list)
 
