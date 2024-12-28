@@ -6,6 +6,7 @@ from pyuipc.core import World, Scene, SceneIO, Engine
 from pyuipc.constitution import AffineBodyConstitution
 from pyuipc import builtin
 from asset import AssetDir
+import torch
 
 import numpy as np
 

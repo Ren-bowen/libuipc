@@ -23,7 +23,7 @@ def simulate():
     dir = (p2 - p1) / np.linalg.norm(p2 - p1) * 9.8
     config = Scene.default_config()
     config['dt'] = 1.0/30
-    config['contact']['d_hat'] = 0.002
+    config['contact']['d_hat'] = 0.001
     config['gravity'] = [[dir[0]],[dir[1]],[dir[2]]]
     config['newton']['velocity_tol'] = 0.05
     config['newton']['max_iter'] = 1024
@@ -44,15 +44,16 @@ def simulate():
     scene.contact_tabular().default_model(1, 1e9)
     t_shirt_elem = scene.contact_tabular().create('t_shirt')
 
-    moduli = ElasticModuli.youngs_poisson(1e4, 0.49)
+    moduli = ElasticModuli.youngs_poisson(1e5, 0.49)
     t_shirt_obj = scene.objects().create('t_shirt')
-    t_shirt = io.read('/root/libuipc/python/mesh/init_mesh.obj')
+    t_shirt = io.read('/root/libuipc/python/mesh/init_mesh_dress4.obj')
     label_surface(t_shirt)
     snh.apply_to(t_shirt, moduli=moduli, thickness=0.0005, mass_density=100.0)
+    dsb.apply_to(t_shirt, E=1)
     t_shirt_elem.apply_to(t_shirt)
 
     rest_t_shirt = t_shirt.copy()
-    aio = AttributeIO('/root/libuipc/python/mesh/opt_mesh.obj')
+    aio = AttributeIO('/root/libuipc/python/mesh/opt_mesh_dress.obj')
     aio.read(builtin.position, rest_t_shirt.positions())
     geo_slot, _ = t_shirt_obj.geometries().create(t_shirt, rest_t_shirt)
 
@@ -64,7 +65,8 @@ def simulate():
     # scene.contact_tabular().insert(t_shirt_elem, t_shirt_elem, 0, 0, False)
 
     io = SimplicialComplexIO()
-    girl = io.read('/root/libuipc/python/mesh/body_smooth1.obj')
+    
+    girl = io.read('/root/libuipc/python/mesh/body_smooth_212.obj')
     label_surface(girl)
     empty.apply_to(girl, thickness=0.0)
     spc.apply_to(girl, 1000)
@@ -81,13 +83,13 @@ def simulate():
         geo_slots:list[GeometrySlot] = info.geo_slots()
         geo:SimplicialComplex = geo_slots[0].geometry()
         aim_pos = geo.vertices().find(builtin.aim_position)
-        # aio = AttributeIO (f'./mannequin_obj/frame_{info.frame()}.obj')
-        aio = AttributeIO ('/root/libuipc/python/mesh/body_smooth1.obj')
+        aio = AttributeIO (f'/root/libuipc/python/mesh/body_mesh/body_{info.frame()}.obj')
+        # aio = AttributeIO ('/root/libuipc/python/mesh/body_smooth_212.obj')
         aio.read(builtin.position, aim_pos)
         # view(aim_pos)[:] *= 100
 
     animator = scene.animator()
-    animator.substep(5)
+    animator.substep(20)
     animator.insert(girl_obj, update)
 
 

@@ -18,7 +18,7 @@ def optimize(v_init, v_k, v_goal, f, iter):
     X_goal = v_goal[f]
     X_ig = torch.zeros_like(X_k)
     # cot[:][0]: angle opposite u, cot[:][2]: angle opposite v, cot[:][1]: the least angle
-    cot = torch.ones_like(f)
+    cot = torch.zeros_like(f)
     # transfer cot from int64 to float32
     cot = cot.float()
     loss = torch.tensor([0], dtype=torch.float32, device='cuda')
@@ -66,6 +66,21 @@ def optimize(v_init, v_k, v_goal, f, iter):
         u_ig = torch.tensor([T_ig[0][0], 0, 0], device='cuda')
         v_ig = torch.tensor([T_ig[0][1], T_ig[1][1], 0], device='cuda')
         w_ig = u_ig - v_ig
+        cos_i_2 = torch.sum(u_ig * u_ig + w_ig * w_ig - v_ig * v_ig) / (2 * torch.norm(u_ig) * torch.norm(w_ig))
+        cot[i][2] = cos_i_2 / torch.sqrt(1 - cos_i_2 ** 2)
+        # cot[i][2] = (u_ig[0] - v_ig[0]) / v_ig[1]
+        cos_i_1 = torch.sum(u_ig * u_ig + v_ig * v_ig - w_ig * w_ig) / (2 * torch.norm(u_ig) * torch.norm(v_ig))
+        cot[i][1] = cos_i_1 / torch.sqrt(1 - cos_i_1 ** 2)
+        # cot[i][1] = v_ig[0] / v_ig[1]
+        cos_i_0 = torch.sum(v_ig * v_ig + w_ig * w_ig - u_ig * u_ig) / (2 * torch.norm(w_ig) * torch.norm(v_ig))
+        cot[i][0] = cos_i_0 / torch.sqrt(1 - cos_i_0 ** 2)
+        assert (cot[i][0] + cot[i][1]) > 1e-6
+        assert torch.norm(u_ig) > 1e-4
+        assert torch.norm(v_ig) > 1e-4
+        assert torch.norm(w_ig) > 1e-4
+        assert torch.isnan(cot[i][2]) == False
+        assert torch.isnan(cot[i][1]) == False
+        assert torch.isnan(cot[i][0]) == False
         
         '''
         u_ig_norm = torch.min(torch.norm(u_goal) * torch.norm(u_init) / torch.norm(u), torch.norm(u_init))
@@ -114,6 +129,23 @@ def optimize(v_init, v_k, v_goal, f, iter):
     edges_ig = torch.norm(X_ig[:, 0] - X_ig[:, 1], dim=1) + torch.norm(X_ig[:, 1] - X_ig[:, 2], dim=1) + torch.norm(X_ig[:, 2] - X_ig[:, 0], dim=1)
     length = torch.tensor([torch.sum(edges_init), torch.sum(edges_k), torch.sum(edges_goal), torch.sum(edges_ig)], device='cuda')
     length = length.cpu().numpy()
+    # save the edges
+    edges_rate_k_goal = edges_k / edges_goal
+    edges_rate_ig_goal = edges_ig / edges_goal 
+    edges_i = edges_goal * edges_goal / edges_k
+    rate_i = edges_goal / edges_k
+    os.makedirs('/root/libuipc/python/output/egde_length', exist_ok=True)
+    np.savetxt('/root/libuipc/python/output/egde_length/edges_rate_k_goal' + str(iter) + '.txt', edges_rate_k_goal.cpu().numpy())
+    np.savetxt('/root/libuipc/python/output/egde_length/edges_rate_ig_goal' + str(iter) + '.txt', edges_rate_ig_goal.cpu().numpy())
+    np.savetxt('/root/libuipc/python/output/egde_length/edges_i' + str(iter) + '.txt', edges_i.cpu().numpy())
+    np.savetxt('/root/libuipc/python/output/egde_length/rate_i' + str(iter) + '.txt', rate_i.cpu().numpy())
+    np.savetxt('/root/libuipc/python/output/egde_length/edges_init' + str(iter) + '.txt', edges_init.cpu().numpy()) 
+    np.savetxt('/root/libuipc/python/output/egde_length/edges_k' + str(iter) + '.txt', edges_k.cpu().numpy())
+    np.savetxt('/root/libuipc/python/output/egde_length/edges_goal' + str(iter) + '.txt', edges_goal.cpu().numpy())
+    np.savetxt('/root/libuipc/python/output/egde_length/edges_ig' + str(iter) + '.txt', edges_ig.cpu().numpy())
+    np.savetxt('/root/libuipc/python/output/egde_length/length' + str(iter) + '.txt', length)
+    # save the edge length sum
+
 
     # v_opt = torch.zeros_like(v_k)
     # global optimization : optimize v_opt by minimizing the energy function
@@ -151,7 +183,7 @@ def optimize(v_init, v_k, v_goal, f, iter):
     return v_opt, loss
 
 
-goal_mesh = trimesh.load_mesh('/root/libuipc/python/mesh/init_mesh_dress4.obj')
+goal_mesh = trimesh.load_mesh('/root/libuipc/python/mesh/init_mesh.obj')
 goal_verts = goal_mesh.vertices
 faces = goal_mesh.faces    
 squares = np.cross(goal_verts[faces][:, 1, :] - goal_verts[faces][:, 0, :], goal_verts[faces][:, 2, :] - goal_verts[faces][:, 0, :])
@@ -165,34 +197,57 @@ for i in range(faces.shape[0]):
         verts_square[faces[i][j]] += squares[i] / 3
 # read obj mesh
 loss_list = []
+loss2_list = []
+loss3_list = []
+loss4_list = []
 simulate()
 assert False
 iterations = 20
 for iter in range(iterations):
     init_mesh = trimesh.load_mesh('/root/libuipc/output/cloth_surface0.obj')
-    rest_k_mesh = trimesh.load_mesh('/root/libuipc/python/mesh/opt_mesh_dress.obj')
-    k_mesh = trimesh.load_mesh('/root/libuipc/output/cloth_surface100.obj') 
+    rest_k_mesh = trimesh.load_mesh('/root/libuipc/python/mesh/opt_mesh.obj')
+    k_mesh = trimesh.load_mesh('/root/libuipc/output/cloth_surface100.obj')
+    edges1 = k_mesh.vertices[faces][:, 1, :] - k_mesh.vertices[faces][:, 0, :]
+    edges2 = k_mesh.vertices[faces][:, 2, :] - k_mesh.vertices[faces][:, 0, :]
+    edges3 = k_mesh.vertices[faces][:, 2, :] - k_mesh.vertices[faces][:, 1, :]
+    loss = np.linalg.norm((init_mesh.vertices - k_mesh.vertices) * verts_square[:, np.newaxis])
+    loss2 = np.linalg.norm(edges1 - gt_edges1) + np.linalg.norm(edges2 - gt_edges2) + np.linalg.norm(edges3 - gt_edges3)
+    loss3 = np.abs(np.linalg.norm(edges1, axis=1) - np.linalg.norm(gt_edges1, axis=1)).sum() + np.abs(np.linalg.norm(edges2, axis=1) - np.linalg.norm(gt_edges2, axis=1)).sum() + np.abs(np.linalg.norm(edges3, axis=1) - np.linalg.norm(gt_edges3, axis=1)).sum()
+    
     # save loss
-
+    np.savetxt('/root/libuipc/python/mesh/loss' + str(iter) + '.txt', np.array([loss]))
+    print("loss = ", loss)
+    print("loss2 = ", loss2)
+    print("loss3 = ", loss3)
+    loss_list.append(loss)
+    loss2_list.append(loss2)
+    loss3_list.append(loss3)
     init_verts = init_mesh.vertices
     rest_k_verts = rest_k_mesh.vertices
     k_verts = k_mesh.vertices
     all_edge_length = np.linalg.norm(k_verts[faces][:, 0, :] - k_verts[faces][:, 1, :], axis=1) + np.linalg.norm(k_verts[faces][:, 1, :] - k_verts[faces][:, 2, :], axis=1) + np.linalg.norm(k_verts[faces][:, 2, :] - k_verts[faces][:, 0, :], axis=1)
     all_edge_length = np.sum(all_edge_length)
     print("all_edge_length = ", all_edge_length)
-    v_opt, loss = optimize(rest_k_verts, k_verts, goal_verts, faces, iter)
-    loss = loss.cpu().numpy()
-    loss = np.array(loss, dtype=np.float64)
-    print("loss = ", loss)
-    loss_list.append(loss)
+    v_opt, loss4 = optimize(rest_k_verts, k_verts, goal_verts, faces, iter)
+    loss4 = loss4.cpu().numpy()
+    loss4 = np.array([loss4], dtype=np.float32)
+    print("loss4 = ", loss4)
+    loss4_list.append(loss4)
     # write obj mesh
     init_center = np.mean(init_verts, axis=0)
     opt_center = np.mean(v_opt, axis=0)
     v_opt += init_center - opt_center
     # print("v_opt - v_k = ", v_opt - k_verts)
-    trimesh.Trimesh(vertices=v_opt, faces=faces).export('/root/libuipc/python/mesh/opt_mesh_dress.obj')
+    trimesh.Trimesh(vertices=v_opt, faces=faces).export('/root/libuipc/python/mesh/opt_mesh.obj')
     simulate()
 print(loss_list)
-losses = np.array(loss_list)
+print(loss2_list)
+print(loss3_list)
+print(loss4_list)
+losses = np.zeros((iterations, 4))
+losses[:, 0] = loss_list
+losses[:, 1] = loss2_list
+losses[:, 2] = loss3_list
+losses[:, 3] = loss4_list
 np.save('/root/libuipc/python/mesh/losses.npy', losses)
 
