@@ -6,6 +6,7 @@ from clothed_human import simulate
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 import pandas as pd
+import igl
 
 def optimize(v_init, v_k, v_goal, f, iter):
     # X_init (=v_init[f]), X_k (=v_k[f]) : numpy array (N, 3, 3), 3d mesh vertices
@@ -150,6 +151,9 @@ def optimize(v_init, v_k, v_goal, f, iter):
     v_opt = spla.spsolve(Q_sparse, p).reshape(-1, 3)
     return v_opt, loss
 
+def optimize_body(v_k, v_init, f, body_verts, body_faces):
+    for i in range(body_verts.shape[0]):
+        dist_init = 
 
 goal_mesh = trimesh.load_mesh('/root/libuipc/python/mesh/init_mesh_dress4.obj')
 goal_verts = goal_mesh.vertices

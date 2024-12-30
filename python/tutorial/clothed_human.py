@@ -92,7 +92,6 @@ def simulate():
     animator.substep(20)
     animator.insert(girl_obj, update)
 
-
     # ground_obj = scene.objects().create('ground')
     # ground_height = 0.0
     # g = ground(ground_height)
