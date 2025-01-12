@@ -20,14 +20,16 @@ def simulate():
 
     # p1 = np.array([0.111477, 0.100992, -1.419501])
     # p2 = np.array([0.094850, 0.103442, -1.007820])
-    p1 = np.array([0.030246, 1.481616, -0.216718])
-    p2 = np.array([0.006792, 1.288225, -0.148160])
+    # p1 = np.array([0.030246, 1.481616, -0.216718])
+    # p2 = np.array([0.006792, 1.288225, -0.148160])
+    p1 = np.array([-0.128374, -0.293004, 1.290584])
+    p2 = (np.array([0.037048, -0.182668, -0.225024]) + np.array([-0.035099, -0.480116, -0.218722])) / 2
     dir = (p2 - p1) / np.linalg.norm(p2 - p1) * 9.8
     config = Scene.default_config()
-    config['dt'] = 1.0/30
+    config['dt'] = 1.0/60
     config['contact']['d_hat'] = 0.003
     config['gravity'] = [[dir[0]],[dir[1]],[dir[2]]]
-    config['newton']['velocity_tol'] = 0.05
+    config['newton']['velocity_tol'] = 0.01
     config['newton']['max_iter'] = 1024
     config['extras']['debug']['dump_surface'] = False
     config['linear_system']['tol_rate'] = 1e-3
@@ -48,7 +50,7 @@ def simulate():
 
     moduli = ElasticModuli.youngs_poisson(1e5, 0.49)
     t_shirt_obj = scene.objects().create('t_shirt')
-    t_shirt = io.read('/root/libuipc/python/mesh/body_mesh1/cloth.obj')
+    t_shirt = io.read('/root/libuipc/python/mesh/body_mesh7/cloth.obj')
     label_surface(t_shirt)
     snh.apply_to(t_shirt, moduli=moduli, thickness=0.0005, mass_density=100.0)
     dsb.apply_to(t_shirt, E=1)
@@ -68,7 +70,7 @@ def simulate():
 
     io = SimplicialComplexIO()
     
-    girl = io.read('/root/libuipc/python/mesh/body_mesh1/body_0.obj')
+    girl = io.read('/root/libuipc/python/mesh/body_mesh7/body_0.obj')
     # girl = io.read('./python/mesh/body_smooth_212.obj')
     label_surface(girl)
     empty.apply_to(girl, thickness=0.0)
@@ -86,8 +88,8 @@ def simulate():
         geo_slots:list[GeometrySlot] = info.geo_slots()
         geo:SimplicialComplex = geo_slots[0].geometry()
         aim_pos = geo.vertices().find(builtin.aim_position)
-        # aio = AttributeIO (f'/root/libuipc/python/mesh/body_mesh/body_{info.frame()}.obj')
-        aio = AttributeIO ('/root/libuipc/python/mesh/body_mesh1/body_0.obj')
+        aio = AttributeIO (f'/root/libuipc/python/mesh/body_mesh7/body_{info.frame()}.obj')
+        # aio = AttributeIO ('/root/libuipc/python/mesh/body_mesh7/body_0.obj')
         # aio = AttributeIO ('./python/mesh/body_smooth_212.obj')
         aio.read(builtin.position, aim_pos)
         # view(aim_pos)[:] *= 100
@@ -104,17 +106,19 @@ def simulate():
 
     world.init(scene)
     sio = SceneIO(scene)
-    sio.write_surface(f'output/scene_surface{world.frame()}.obj')
+    sio.write_surface(f'output2/scene_surface{world.frame()}.obj')
     io = SimplicialComplexIO()
-    io.write(f'output/cloth_surface{world.frame()}.obj', geo_slot.geometry())
+    io.write(f'output2/cloth_surface{world.frame()}.obj', geo_slot.geometry())
 
     run = False
     # sgui = SceneGUI(scene)
     # tri_surf, line_surf, points = sgui.register()
 
-    while world.frame() < 100:
+    while world.frame() < 600:
         world.advance()
         world.retrieve()
         io = SimplicialComplexIO()
-        io.write(f"output/cloth_surface{world.frame()}.obj", geo_slot.geometry())
-        sio.write_surface(f"output/scene_surface{world.frame()}.obj")
+        # io.write(f"output2/cloth_surface{world.frame()}.obj", geo_slot.geometry())
+        sio.write_surface(f"output2/scene_surface{world.frame()}.obj")
+
+simulate()

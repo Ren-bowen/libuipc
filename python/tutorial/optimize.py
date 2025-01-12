@@ -3,10 +3,89 @@ import torch
 import numpy as np
 import trimesh
 from clothed_human import simulate
+from smpl_util import JointMapper, smpl_to_openpose
+from rotation_utils import quaternion_to_rotation_matrix, rotation_matrix_to_quaternion
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 import pandas as pd
 import igl
+import smplx
+
+def piont_edge_distance(p, v1, v2):
+    t = torch.sum((p - v1) * (v2 - v1), dim=-1) / torch.sum((v2 - v1) ** 2, dim=-1)
+    result = torch.where(
+        t < 0,
+        torch.norm(p - v1, dim=-1),
+        torch.where(
+            t > 1,
+            torch.norm(p - v2, dim=-1),
+            torch.norm(p - (v1 + t.unsqueeze(-1) * (v2 - v1)), dim=-1)
+        )
+    )
+    return result
+
+
+def distance_loss(eps, p, v, e):
+    # p = torch.tensor(p, dtype=torch.float32, device='cuda')
+    v = torch.tensor(v, dtype=torch.float32, device='cuda')
+    e = torch.tensor(e, dtype=torch.int64, device='cuda')
+    v1 = v[e[:, 0]]
+    v2 = v[e[:, 1]]
+    v3 = v[e[:, 2]]
+    # center = (v1 + v2 + v3) / 3  
+    # min_idx = torch.argmin(torch.norm(p.unsqueeze(1) - center.unsqueeze(0), dim=-1), dim=1)
+    _, min_idx, _ = igl.point_mesh_squared_distance(p.detach().cpu().numpy(), v.detach().cpu().numpy(), e.detach().cpu().numpy())
+    # normals = torch.cross(v2[min_idx] - v1[min_idx], v3[min_idx] - v1[min_idx], dim=-1)
+    v1 = v1[min_idx, :]
+    v2 = v2[min_idx, :]
+    v3 = v3[min_idx, :]
+    # edge1 = v2 - v1
+    #  edge2 = v3 - v1
+    # normal = torch.cross(edge1, edge2, dim=-1)
+    # normal = normal / (torch.norm(normal, dim=-1, keepdim=True) + 1e-10)
+    # distance = torch.sum((p - v1) * normal, dim=-1)
+    # proj_p = p - distance.unsqueeze(1) * normal
+    # proj_p = t0 * v1 + t1 * v2 + t2 * v3
+    LHS = torch.stack([
+        torch.stack([
+            torch.sum(v1 * (v2 - v1), dim=1),
+            torch.sum(v2 * (v2 - v1), dim=1),
+            torch.sum(v3 * (v2 - v1), dim=1)
+        ], dim=1),
+        torch.stack([
+            torch.sum(v1 * (v3 - v1), dim=1),
+            torch.sum(v2 * (v3 - v1), dim=1),
+            torch.sum(v3 * (v3 - v1), dim=1)
+        ], dim=1),
+        torch.stack([
+            torch.tensor(1, device='cuda').expand(v1.size(0)),
+            torch.tensor(1, device='cuda').expand(v1.size(0)),
+            torch.tensor(1, device='cuda').expand(v1.size(0))
+        ], dim=1)
+    ], dim=2)
+
+    Rhs = torch.stack([
+        torch.sum(p * (v2 - v1), dim=1),
+        torch.sum(p * (v3 - v1), dim=1),
+        torch.ones(p.size(0), device='cuda')
+    ], dim=1)
+    t = torch.linalg.solve(LHS, Rhs)
+    distance = torch.norm(p - t[0] * v1 + t[1] * v2 + t[2] * v3, dim=-1)
+    distance1 = piont_edge_distance(p, v[e[min_idx, 0]], v[e[min_idx, 1]])
+    distance2 = piont_edge_distance(p, v[e[min_idx, 1]], v[e[min_idx, 2]])
+    distance3 = piont_edge_distance(p, v[e[min_idx, 2]], v[e[min_idx, 0]])
+    # if t[i][0] < 0 or t[i][1] < 0 or t[i][2] < 0:
+    #     distance[i] = torch.min(torch.min(distance1, distance2), distance3)
+    distance = torch.where(
+        torch.logical_or(
+            torch.logical_or(t[:, 0] < 0, t[:, 1] < 0),
+            t[:, 2] < 0
+        ),
+        torch.min(torch.min(distance1, distance2), distance3),
+        distance
+    )
+    loss = torch.sum(torch.max(eps - distance, torch.tensor(0.0, device=p.device)))
+    return loss
 
 def optimize(v_init, v_k, v_goal, f, iter):
     # X_init (=v_init[f]), X_k (=v_k[f]) : numpy array (N, 3, 3), 3d mesh vertices
@@ -151,11 +230,74 @@ def optimize(v_init, v_k, v_goal, f, iter):
     v_opt = spla.spsolve(Q_sparse, p).reshape(-1, 3)
     return v_opt, loss
 
-def optimize_body(v_k, v_init, f, body_verts, body_faces):
-    for i in range(body_verts.shape[0]):
-        dist_init = 
+def optimize_body(v_k, v_init, f, body_verts, body_faces, smpl_model, beta=None, pose=None, orient=None, transl=None):
+    body_verts_init = body_verts
+    body_verts_init = torch.tensor(body_verts_init, dtype=torch.float32, device='cuda')
+    d_hat = 3e-3
+    dist_init, _, _ = igl.point_mesh_squared_distance(body_verts, v_init, f)
+    dist_k,_,_ = igl.point_mesh_squared_distance(body_verts, v_k, f)
+    mask = dist_k < (d_hat / 25)
+    dist_init = np.sqrt(dist_init)
+    dist_k = np.sqrt(dist_k)
+    body_normals = igl.per_vertex_normals(body_verts, body_faces)  
+    body_normals = body_normals / np.linalg.norm(body_normals, axis=1).reshape(-1, 1)
+    offset = dist_init - dist_k
+    offset[offset < 0] = 0
+    body_verts = body_verts + body_normals * offset.reshape(-1, 1) * mask.reshape(-1, 1)
+    
+    betas = np.load('./python/mesh/beta_1.npy')
+    pose = np.load('./python/mesh/pose.npy')
+    rotation_matrix = np.load('./python/mesh/rotations1.npy')[0]
+    transl = np.load('./python/mesh/transs1.npy')[0]
+    betas = torch.tensor(betas, dtype=torch.float32, device='cuda')
+    body_pose = torch.tensor(pose, dtype=torch.float32, device='cuda')
+    rotation_matrix = torch.tensor(rotation_matrix, dtype=torch.float32, device='cuda')
+    transl = torch.tensor(transl, dtype=torch.float32, device='cuda')
+    quaternion = rotation_matrix_to_quaternion(rotation_matrix)
+    body_verts = torch.tensor(body_verts, dtype=torch.float32, device='cuda')
+    mask = torch.tensor(mask, dtype=torch.float32, device='cuda')
+    # body_pose.requires_grad = True
+    betas.requires_grad = True
+    # quaternion.requires_grad = True
+    # transl.requires_grad = True
+    optimizer = torch.optim.Adam([betas], lr=1e-3)
+    for i in range(1500):
+        if i > 800:
+            optimizer = torch.optim.Adam([betas], lr=1e-3)
+        optimizer.zero_grad()
+        out = smpl_model(betas=betas, body_pose=body_pose, return_verts=True)
+        body_verts_opt = out['vertices'].squeeze(0)
+        body_verts_opt = torch.matmul(body_verts_opt, quaternion_to_rotation_matrix(quaternion).T) + transl
+        if i < 10000:
+            loss = (torch.norm(body_verts_opt - body_verts, dim=1) * mask).mean() * 1000
+        else:
+            loss = torch.tensor(0, dtype=torch.float32, device='cuda')
+        body_loss = distance_loss(0.003, body_verts_opt, v_init, f)
+        print(loss.requires_grad, loss.grad_fn)
+        loss += body_loss * 1000
+        print(loss.requires_grad, loss.grad_fn)
+        # if (i > 100):
+        #     loss += body_loss * 30000
+        print("body_loss = ", body_loss * 1000)
+        print("i = ", i, "loss = ", loss)
+        print("torch.norm(body_verts_opt - body_verts_init, dim=1).mean() = ", torch.norm(body_verts_opt - body_verts_init, dim=1).mean() * 1000)
+        loss.backward()
+        optimizer.step()
 
-goal_mesh = trimesh.load_mesh('/root/libuipc/python/mesh/init_mesh_dress4.obj')
+    return body_verts_opt.detach().cpu().numpy()
+
+joint_mapper = JointMapper(smpl_to_openpose(model_type='smplx', use_hands=True, use_face=True, use_face_contour=False, openpose_format='coco25'))
+smpl_model = smplx.create("/root/cloth-body-reconstruction/smplx/models", model_type="smplx", joint_mapper=joint_mapper)
+output = smpl_model(return_verts=True)
+beta = output['betas']
+pose = output['body_pose']
+orient = output['global_orient']
+transl = output['transl']
+
+body_mesh = trimesh.load_mesh('./python/mesh/body_mesh1/body_0.obj')
+body_verts = body_mesh.vertices
+body_faces = body_mesh.faces
+goal_mesh = trimesh.load_mesh('./python/mesh/body_mesh1/cloth.obj')
 goal_verts = goal_mesh.vertices
 faces = goal_mesh.faces    
 squares = np.cross(goal_verts[faces][:, 1, :] - goal_verts[faces][:, 0, :], goal_verts[faces][:, 2, :] - goal_verts[faces][:, 0, :])
@@ -169,13 +311,15 @@ for i in range(faces.shape[0]):
         verts_square[faces[i][j]] += squares[i] / 3
 # read obj mesh
 loss_list = []
-simulate()
-assert False
+dist_list = []
+
+# simulate()
+
 iterations = 20
 for iter in range(iterations):
-    init_mesh = trimesh.load_mesh('/root/libuipc/output/cloth_surface0.obj')
-    rest_k_mesh = trimesh.load_mesh('/root/libuipc/python/mesh/opt_mesh_dress.obj')
-    k_mesh = trimesh.load_mesh('/root/libuipc/output/cloth_surface100.obj') 
+    init_mesh = trimesh.load_mesh('./output/cloth_surface0.obj')
+    rest_k_mesh = trimesh.load_mesh('./python/mesh/opt_mesh_dress.obj')
+    k_mesh = trimesh.load_mesh('./output/cloth_surface100.obj') 
     # save loss
 
     init_verts = init_mesh.vertices
@@ -184,7 +328,12 @@ for iter in range(iterations):
     all_edge_length = np.linalg.norm(k_verts[faces][:, 0, :] - k_verts[faces][:, 1, :], axis=1) + np.linalg.norm(k_verts[faces][:, 1, :] - k_verts[faces][:, 2, :], axis=1) + np.linalg.norm(k_verts[faces][:, 2, :] - k_verts[faces][:, 0, :], axis=1)
     all_edge_length = np.sum(all_edge_length)
     print("all_edge_length = ", all_edge_length)
+    dist = torch.norm(torch.tensor(k_verts, dtype=torch.float32, device='cuda') - torch.tensor(init_verts, dtype=torch.float32, device='cuda'), dim=1)
+    print("dist = ", torch.sum(dist))
+    dist_list.append(torch.sum(dist))
+    # body_verts = optimize_body(k_verts, init_verts, faces, body_verts, body_faces, smpl_model, beta, pose, orient, transl)
     v_opt, loss = optimize(rest_k_verts, k_verts, goal_verts, faces, iter)
+    # trimesh.Trimesh(vertices=body_verts, faces=body_faces).export('./python/mesh/body_smooth_212.obj')
     loss = loss.cpu().numpy()
     loss = np.array(loss, dtype=np.float64)
     print("loss = ", loss)
@@ -194,9 +343,13 @@ for iter in range(iterations):
     opt_center = np.mean(v_opt, axis=0)
     v_opt += init_center - opt_center
     # print("v_opt - v_k = ", v_opt - k_verts)
-    trimesh.Trimesh(vertices=v_opt, faces=faces).export('/root/libuipc/python/mesh/opt_mesh_dress.obj')
+    trimesh.Trimesh(vertices=v_opt, faces=faces).export('./python/mesh/opt_mesh_dress.obj')
+    # trimesh.Trimesh(vertices=body_verts, faces=body_faces).export('./python/mesh/body_smooth_212.obj')
     simulate()
-print(loss_list)
-losses = np.array(loss_list)
-np.save('/root/libuipc/python/mesh/losses.npy', losses)
 
+print(loss_list)
+print(dist_list)
+losses = np.array(loss_list)
+distances = np.array(dist_list)
+np.save('./python/mesh/losses.npy', losses)
+np.save('./python/mesh/distances.npy', distances)

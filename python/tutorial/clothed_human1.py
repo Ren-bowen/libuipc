@@ -20,14 +20,14 @@ def simulate():
 
     # p1 = np.array([0.111477, 0.100992, -1.419501])
     # p2 = np.array([0.094850, 0.103442, -1.007820])
-    p1 = np.array([0.030246, 1.481616, -0.216718])
-    p2 = np.array([0.006792, 1.288225, -0.148160])
+    p2 = np.array([-0.008961, 1.274458, -0.033178])
+    p1 = np.array([-0.009033, 1.435553, -0.051722])
     dir = (p2 - p1) / np.linalg.norm(p2 - p1) * 9.8
     config = Scene.default_config()
-    config['dt'] = 1.0/30
+    config['dt'] = 1.0/150
     config['contact']['d_hat'] = 0.003
     config['gravity'] = [[dir[0]],[dir[1]],[dir[2]]]
-    config['newton']['velocity_tol'] = 0.05
+    config['newton']['velocity_tol'] = 0.01
     config['newton']['max_iter'] = 1024
     config['extras']['debug']['dump_surface'] = False
     config['linear_system']['tol_rate'] = 1e-3
@@ -69,7 +69,6 @@ def simulate():
     io = SimplicialComplexIO()
     
     girl = io.read('/root/libuipc/python/mesh/body_mesh1/body_0.obj')
-    # girl = io.read('./python/mesh/body_smooth_212.obj')
     label_surface(girl)
     empty.apply_to(girl, thickness=0.0)
     spc.apply_to(girl, 1000)
@@ -86,14 +85,14 @@ def simulate():
         geo_slots:list[GeometrySlot] = info.geo_slots()
         geo:SimplicialComplex = geo_slots[0].geometry()
         aim_pos = geo.vertices().find(builtin.aim_position)
-        # aio = AttributeIO (f'/root/libuipc/python/mesh/body_mesh/body_{info.frame()}.obj')
-        aio = AttributeIO ('/root/libuipc/python/mesh/body_mesh1/body_0.obj')
-        # aio = AttributeIO ('./python/mesh/body_smooth_212.obj')
+        # num = int(info.frame() / 5)
+        aio = AttributeIO (f'/root/libuipc/python/mesh/body_mesh1/body_{int(info.frame() / 5)}.obj')
+        # aio = AttributeIO ('/root/libuipc/python/mesh/body_smooth_212.obj')
         aio.read(builtin.position, aim_pos)
         # view(aim_pos)[:] *= 100
 
     animator = scene.animator()
-    animator.substep(20)
+    animator.substep(10)
     animator.insert(girl_obj, update)
 
     # ground_obj = scene.objects().create('ground')
@@ -112,9 +111,11 @@ def simulate():
     # sgui = SceneGUI(scene)
     # tri_surf, line_surf, points = sgui.register()
 
-    while world.frame() < 100:
+    while world.frame() < 3000:
         world.advance()
         world.retrieve()
         io = SimplicialComplexIO()
-        io.write(f"output/cloth_surface{world.frame()}.obj", geo_slot.geometry())
-        sio.write_surface(f"output/scene_surface{world.frame()}.obj")
+        io.write(f"output1/cloth_surface{world.frame()}.obj", geo_slot.geometry())
+        sio.write_surface(f"output1/scene_surface{world.frame()}.obj")
+
+simulate()
