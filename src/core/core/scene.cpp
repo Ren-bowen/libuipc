@@ -11,6 +11,7 @@ class Scene::Impl
     Impl(Scene& scene, const Json& config) noexcept
         : scene(scene)
         , animator(scene)
+        , sanity_checker(scene)
     {
         info = config;
     }
@@ -23,29 +24,23 @@ class Scene::Impl
 
         dt = info["dt"].get<Float>();
 
-        spdlog::info("Scene Init: Collecting Constitution UIDs ...");
         constitution_tabular.init(visitor);
 
         if(info["diff_sim"]["enable"].get<bool>())
         {
-            spdlog::info("Scene Init: Initializing Differentiable Simulation Parameters ...");
             diff_sim.init(visitor);
         }
-
-        diff_sim.init(visitor);
 
         started = true;
     }
 
-    void begin_pending() noexcept
-    {
-        // Do nothing
-    }
+    void begin_pending() noexcept { pending = true; }
 
     void solve_pending() noexcept
     {
         geometries.solve_pending();
         rest_geometries.solve_pending();
+        pending = false;
     }
 
     Json                info;
@@ -57,8 +52,10 @@ class Scene::Impl
 
     geometry::GeometryCollection geometries;
     geometry::GeometryCollection rest_geometries;
+    SanityChecker                sanity_checker;
 
     bool   started = false;
+    bool   pending = false;
     Scene& scene;
     World* world = nullptr;
     Float  dt    = 0.0;
@@ -116,7 +113,14 @@ Json Scene::default_config() noexcept
         collision_detection["method"] = "linear_bvh";
     }
 
-    config["sanity_check"]["enable"] = true;
+    auto& sanity_check = config["sanity_check"];
+    {
+        sanity_check["enable"] = true;
+
+        // normal: automatically export mesh to workspace
+        // quiet: do not export mesh
+        sanity_check["mode"] = "normal";
+    }
 
     auto& recovery = config["recovery"] = Json::object();
     {
@@ -209,6 +213,16 @@ const DiffSim& Scene::diff_sim() const
     return m_impl->diff_sim;
 }
 
+SanityChecker& Scene::sanity_checker()
+{
+    return m_impl->sanity_checker;
+}
+
+const SanityChecker& Scene::sanity_checker() const
+{
+    return m_impl->sanity_checker;
+}
+
 void Scene::init(backend::WorldVisitor& world)
 {
     m_impl->init(world);
@@ -249,6 +263,11 @@ bool Scene::is_started() const noexcept
     return m_impl->started;
 }
 
+bool Scene::is_pending() const noexcept
+{
+    return m_impl->pending;
+}
+
 // ----------------------------------------------------------------------------
 // Objects
 // ----------------------------------------------------------------------------
@@ -276,15 +295,15 @@ void Scene::Objects::destroy(IndexT id) &&
 
     for(auto geo_id : geo_ids)
     {
-        if(!m_scene.m_impl->started)
-        {
-            m_scene.m_impl->geometries.destroy(geo_id);
-            m_scene.m_impl->rest_geometries.destroy(geo_id);
-        }
-        else
+        if(m_scene.is_started() || m_scene.is_pending())
         {
             m_scene.m_impl->geometries.pending_destroy(geo_id);
             m_scene.m_impl->rest_geometries.pending_destroy(geo_id);
+        }
+        else // before `world.init(scene)` is called
+        {
+            m_scene.m_impl->geometries.destroy(geo_id);
+            m_scene.m_impl->rest_geometries.destroy(geo_id);
         }
     }
     m_scene.m_impl->objects.destroy(id);
