@@ -66,6 +66,7 @@ class DiscretePatternBending final : public FiniteElementExtraConstitution
 
         list<Vector4i> stencil_list;
         list<Float>    bending_stiffness_list;
+        list<Float>    rest_angle_list;
 
         // 1) Retrieve Quad Stencils
         info.for_each(  //
@@ -106,8 +107,10 @@ class DiscretePatternBending final : public FiniteElementExtraConstitution
                 }
 
                 auto bending_stiffnesses = sc.edges().find<Float>("bending_stiffness");
+                auto rest_angles = sc.edges().find<Float>("rest_angle");
                 UIPC_ASSERT(bending_stiffnesses, "Bending stiffness not found, why?");
                 auto bs_view = bending_stiffnesses->view();
+                auto rest_angles_view = rest_angles->view();
 
                 for(auto&& [E, info] : stencil_map)
                 {
@@ -124,6 +127,9 @@ class DiscretePatternBending final : public FiniteElementExtraConstitution
 
                         Float bs = bs_view[info.edge_index];
                         bending_stiffness_list.push_back(bs);
+
+                        Float rest_angle = rest_angles_view[info.edge_index];
+                        rest_angle_list.push_back(rest_angle);
                     }
                 }
             });
@@ -140,20 +146,23 @@ class DiscretePatternBending final : public FiniteElementExtraConstitution
         h_rest_lengths.resize(h_stencils.size());
         h_h_bars.resize(h_stencils.size());
         h_theta_bars.resize(h_stencils.size());
+        UIPC_ASSERT(h_theta_bars.size() == rest_angle_list.size(),
+                   "rest angle size mismatch");
+        std::ranges::move(rest_angle_list, h_theta_bars.begin());
         h_V_bars.resize(h_stencils.size());
 
-        info.for_each(  //
-            geo_slots,
-            [](geometry::SimplicialComplex& sc)
-            {
-                auto rest_angles = sc.edges().find<Float>("rest_angle");
-                return rest_angles->view();
-            },
-            [&](const ForEachInfo& I, auto rest_angle)
-            {
-                std::size_t v = I.global_index();
-                h_theta_bars[v] = rest_angle;
-            });
+        // info.for_each(  //
+        //     geo_slots,
+        //     [](geometry::SimplicialComplex& sc)
+        //     {
+        //         auto rest_angles = sc.edges().find<Float>("rest_angle");
+        //         return rest_angles->view();
+        //     },
+        //     [&](const ForEachInfo& I, auto rest_angle)
+        //     {
+        //         std::size_t v = I.global_index();
+        //         h_theta_bars[v] = rest_angle;
+        //     });
 
         for(auto&& [i, stencil] : enumerate(h_stencils))
         {

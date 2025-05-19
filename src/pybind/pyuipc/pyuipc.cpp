@@ -46,4 +46,5 @@ void detail::assert_with_source_location(bool             condition,
         throw PyException(assert_msg);
     }
 }
-}  // namespace pyuipc
+}  // namespace pyuipc   
+ 
