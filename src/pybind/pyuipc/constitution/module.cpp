@@ -6,6 +6,7 @@
 #include <pyuipc/constitution/particle.h>
 #include <pyuipc/constitution/hookean_spring.h>
 #include <pyuipc/constitution/neo_hookean_shell.h>
+#include <pyuipc/constitution/neo_hookean_pattern.h>
 #include <pyuipc/constitution/stable_neo_hookean.h>
 #include <pyuipc/constitution/affine_body_constitution.h>
 #include <pyuipc/constitution/constraint.h>
@@ -14,6 +15,7 @@
 #include <pyuipc/constitution/kirchhoff_rod_bending.h>
 #include <pyuipc/constitution/soft_transform_constraint.h>
 #include <pyuipc/constitution/discrete_shell_bending.h>
+#include <pyuipc/constitution/discrete_pattern_bending.h>
 #include <pyuipc/constitution/arap.h>
 
 namespace pyuipc::constitution
@@ -33,6 +35,7 @@ PyModule::PyModule(py::module& m)
     PyParticle{m};
     PyHookeanSpring{m};
     PyNeoHookeanShell{m};
+    PyNeoHookeanPattern{m};
     PyStableNeoHookean{m};
     PyARAP{m};
 
@@ -40,6 +43,7 @@ PyModule::PyModule(py::module& m)
     PyFiniteElementExtraConstitution{m};
     PyKirchhoffRodBending{m};
     PyDiscreteShellBending{m};
+    PyDiscretePatternBending{m};
 
     // Constraints
     PySoftPositionConstraint{m};
